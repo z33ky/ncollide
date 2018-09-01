@@ -89,6 +89,50 @@ where
         self.pairs.len()
     }
 
+    /// Visit objects interfering with a specific object.
+    pub fn interferences_with_object(&self, handle: ProxyHandle, visitor: &mut FnMut(&T)) {
+        let proxy = &self.proxies.get(handle.uid());
+        if proxy.is_none() {
+            return;
+        }
+        let proxy = proxy.unwrap();
+
+        let leaf = match proxy.status {
+            ProxyStatus::OnStaticTree(leaf) => {
+                &self.stree[leaf]
+            }
+            ProxyStatus::OnDynamicTree(leaf, _) => {
+                &self.tree[leaf]
+            }
+            ProxyStatus::Detached(None) => {
+                panic!("DBVT broad phase internal error: the proxy was detached.")
+            }
+            ProxyStatus::Detached(Some(id)) => {
+                &self.leaves_to_update[id]
+            }
+            ProxyStatus::Deleted => {
+                panic!("DBVT broad phase internal error: the proxy was deleted.")
+            }
+        };
+
+        let mut collector = Vec::new();
+        {
+            let mut visitor = BoundingVolumeInterferencesCollector::new(
+                &leaf.bounding_volume,
+                &mut collector,
+            );
+
+            self.tree.visit(&mut visitor);
+            self.stree.visit(&mut visitor);
+        }
+
+        for l in collector.into_iter() {
+            if self.pairs.contains_key(&SortedPair::new(l, leaf.data)) {
+                visitor(&self.proxies[l.uid()].data);
+            }
+        }
+    }
+
     fn purge_some_contact_pairs(
         &mut self,
         allow_proximity: &mut FnMut(&T, &T) -> bool,
